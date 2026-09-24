@@ -6,9 +6,11 @@ const PART_COLORS = [
   '#a7f3d0', '#f5d0fe', '#bae6fd', '#fef08a', '#fecdd3',
 ];
 
-export function partColor(name) {
+// 颜色键：多订单拼版时同订单同名零件同色，不同订单的同名零件异色
+export function partColor(name, order) {
+  const key = order ? `${order}⟂${name}` : name;
   let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
   return PART_COLORS[h % PART_COLORS.length];
 }
 
@@ -16,7 +18,7 @@ const PAD = 14;
 
 /**
  * 单板裁切图示：
- *  - 米黄色底 = 余料；彩色块 = 零件；灰色锯缝带 + 虚线刀刃 = 每一刀
+ *  - 米黄色底 = 余料；彩色块 = 零件（左上角小字标注订单号）；灰色锯缝带 + 虚线刀刃 = 每一刀
  *  - 圆形编号标注下刀次序（贯穿当前矩形区域）
  */
 export default function BoardDiagram({ board, boardWidth, boardHeight }) {
@@ -59,6 +61,8 @@ export default function BoardDiagram({ board, boardWidth, boardHeight }) {
         const h = p.h * scale;
         const showMain = w > 56 && h > 26;
         const showDims = w > 56 && h > 42;
+        const showOrder = p.order && w > 40 && h > 18;
+        const orderTag = p.order && p.order.length > 10 ? p.order.slice(0, 10) + '…' : p.order;
         return (
           <g key={`p-${i}`}>
             <rect
@@ -66,12 +70,17 @@ export default function BoardDiagram({ board, boardWidth, boardHeight }) {
               y={px(p.y)}
               width={w}
               height={h}
-              fill={partColor(p.part)}
+              fill={partColor(p.part, p.order)}
               stroke="#334155"
               strokeWidth={1.2}
             >
-              <title>{`${p.part} ${id}：${dims}，位置 (${strip(p.x)}, ${strip(p.y)})`}</title>
+              <title>{`订单「${p.order || ''}」${p.part} ${id}：${dims}，位置 (${strip(p.x)}, ${strip(p.y)})`}</title>
             </rect>
+            {showOrder && (
+              <text x={px(p.x) + 4} y={px(p.y) + 11} className="part-order">
+                {orderTag}
+              </text>
+            )}
             {showMain && (
               <text x={px(p.x) + w / 2} y={px(p.y) + h / 2 - (showDims ? 4 : 0)} className="part-label">
                 {p.part.length > 8 ? p.part.slice(0, 8) + '…' : p.part} {id}

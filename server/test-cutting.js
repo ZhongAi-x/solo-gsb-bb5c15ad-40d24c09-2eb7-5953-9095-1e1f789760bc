@@ -105,4 +105,131 @@ assert.throws(() => cutBoards({ boardWidth: 10, boardHeight: 10, kerf: -1, parts
 assert.throws(() => cutBoards({ boardWidth: 10, boardHeight: 10, kerf: 0, parts: [] }), UserError);
 assert.throws(() => cutBoards({ boardWidth: 10, boardHeight: 10, kerf: 0, parts: [{ name: 'a', width: 5, height: 5, quantity: 0 }] }), UserError);
 
+// 10) 多订单拼版：跨板、订单归属、同名零件允许、按输入顺序切割
+const mo = cutBoards({
+  boardWidth: 1200, boardHeight: 800, kerf: 0, boardPrice: 10,
+  orders: [
+    { orderNo: 'A', parts: [{ name: '块', width: 600, height: 400, quantity: 5 }] },
+    { orderNo: 'B', parts: [{ name: '块', width: 600, height: 400, quantity: 5 }] },
+  ],
+});
+assert.strictEqual(mo.boardsCount, 3);
+assert.strictEqual(mo.mode, 'orders');
+// 顺序：先 A×5 再 B×5，每板 4 件 → 板1 A×4，板2 A×1+B×3，板3 B×2
+const counts = (b, order) => b.placements.filter((p) => p.order === order).length;
+assert.strictEqual(counts(mo.boards[0], 'A'), 4);
+assert.strictEqual(counts(mo.boards[0], 'B'), 0);
+assert.strictEqual(counts(mo.boards[1], 'A'), 1);
+assert.strictEqual(counts(mo.boards[1], 'B'), 3);
+assert.strictEqual(counts(mo.boards[2], 'B'), 2);
+assert.ok(mo.boards[1].placements[0].order === 'A', '板2 首件应为先输入的订单 A');
+assert.strictEqual(mo.boards[1].placements[0].part, '块'); // 不同订单同名零件
+
+// 逐板分摊额之和 = 板价
+for (const b of mo.boards) {
+  const sum = b.cost.shares.reduce((s, x) => s + x.cents, 0);
+  assert.strictEqual(sum, b.cost.priceCents, `板 ${b.index} 分摊额不等于板价`);
+}
+// 订单汇总 = 总板价（A: 1000 + 250 = 1250；B: 750 + 1000 = 1750）
+assert.strictEqual(mo.totalMaterialCents, 3000);
+const sumOrders = mo.orders.reduce((s, o) => s + o.materialCents, 0);
+assert.strictEqual(sumOrders, mo.totalMaterialCents, '订单汇总额不等于总板价');
+const oA = mo.orders.find((o) => o.order === 'A');
+const oB = mo.orders.find((o) => o.order === 'B');
+assert.strictEqual(oA.materialCents, 1250);
+assert.strictEqual(oB.materialCents, 1750);
+assert.deepStrictEqual(oA.boardIndices, [1, 2]);
+assert.deepStrictEqual(oB.boardIndices, [2, 3]);
+assert.strictEqual(oA.partsCount, 5);
+assert.strictEqual(oB.partsCount, 5);
+
+// 分单取件清单：按订单列出件号 / 板号 / 坐标，板号升序且不重复
+for (const pl of mo.pickList) {
+  const boards = pl.items.map((it) => it.board);
+  assert.deepStrictEqual(boards, [...boards].sort((a, b) => a - b), `订单 ${pl.order} 取件清单未按板号排序`);
+  assert.strictEqual(pl.items.length, 5);
+  for (const it of pl.items) {
+    assert.ok(Number.isFinite(it.x) && Number.isFinite(it.y), '取件清单缺少坐标');
+  }
+}
+const plA = mo.pickList.find((p) => p.order === 'A');
+assert.deepStrictEqual(plA.items.map((it) => it.board), [1, 1, 1, 1, 2]);
+assert.deepStrictEqual(plA.items.map((it) => it.index), [1, 2, 3, 4, 5]);
+
+// 11) 最大余数法：同余时按订单输入顺序补尾差
+const tie = cutBoards({
+  boardWidth: 1000, boardHeight: 1000, kerf: 0, boardPrice: 10.01, // 1001 分
+  orders: [
+    { orderNo: '甲', parts: [{ name: 'a', width: 250, height: 1000, quantity: 2 }] }, // 500000
+    { orderNo: '乙', parts: [{ name: 'b', width: 250, height: 1000, quantity: 2 }] }, // 500000
+  ],
+});
+assert.strictEqual(tie.boardsCount, 1);
+const tieShares = tie.boards[0].cost.shares;
+assert.strictEqual(tieShares.reduce((s, x) => s + x.cents, 0), 1001);
+assert.strictEqual(tieShares[0].order, '甲');
+assert.strictEqual(tieShares[0].cents, 501); // 500.5 同余，输入顺序在先者得尾差
+assert.strictEqual(tieShares[1].cents, 500);
+
+// 12) 最大余数法：余数不同，大者优先
+const lr = cutBoards({
+  boardWidth: 1000, boardHeight: 1000, kerf: 0, boardPrice: 0.03, // 3 分
+  orders: [
+    { orderNo: '甲', parts: [{ name: 'a', width: 600, height: 1000, quantity: 1 }] }, // 60% → 1.8 分
+    { orderNo: '乙', parts: [{ name: 'b', width: 400, height: 1000, quantity: 1 }] }, // 40% → 1.2 分
+  ],
+});
+const lrShares = lr.boards[0].cost.shares;
+assert.strictEqual(lrShares.find((x) => x.order === '甲').cents, 2);
+assert.strictEqual(lrShares.find((x) => x.order === '乙').cents, 1);
+
+// 13) 多订单输入校验
+assert.throws(() => cutBoards({
+  boardWidth: 1000, boardHeight: 1000,
+  orders: [
+    { orderNo: 'X1', parts: [{ name: 'a', width: 10, height: 10, quantity: 1 }] },
+    { orderNo: 'X1', parts: [{ name: 'b', width: 10, height: 10, quantity: 1 }] },
+  ],
+}), UserError, '订单号重复应报错');
+
+assert.throws(() => cutBoards({
+  boardWidth: 1000, boardHeight: 1000,
+  orders: [{ orderNo: 'X', parts: [
+    { name: '同', width: 10, height: 10, quantity: 1 },
+    { name: '同', width: 10, height: 10, quantity: 1 },
+  ] }],
+}), UserError, '同订单内零件同名应报错');
+
+assert.throws(() => cutBoards({
+  boardWidth: 1000, boardHeight: 1000, boardPrice: -1,
+  orders: [{ orderNo: 'X', parts: [{ name: 'a', width: 10, height: 10, quantity: 1 }] }],
+}), UserError, '负板价应报错');
+
+assert.throws(() => cutBoards({
+  boardWidth: 1000, boardHeight: 1000, boardPrice: 1.234,
+  orders: [{ orderNo: 'X', parts: [{ name: 'a', width: 10, height: 10, quantity: 1 }] }],
+}), UserError, '超过两位小数应报错');
+
+assert.doesNotThrow(() => cutBoards({
+  boardWidth: 1000, boardHeight: 1000, boardPrice: 0,
+  orders: [{ orderNo: 'X', parts: [{ name: 'a', width: 10, height: 10, quantity: 1 }] }],
+}), '零板价应允许');
+
+// 无订单号 / 无零件名自动补默认值
+const def = cutBoards({
+  boardWidth: 1000, boardHeight: 1000,
+  orders: [{ parts: [{ width: 10, height: 10, quantity: 1 }] }],
+});
+assert.strictEqual(def.orders[0].order, '订单1');
+assert.strictEqual(def.boards[0].placements[0].part, '零件1');
+
+// 旧版顶层 parts 仍然兼容
+const legacy = cutBoards({
+  boardWidth: 1000, boardHeight: 1000,
+  parts: [{ name: 'a', width: 10, height: 10, quantity: 2 }],
+});
+assert.strictEqual(legacy.mode, 'single');
+assert.strictEqual(legacy.boards[0].placements[0].order, '订单1');
+assert.strictEqual(legacy.boardPrice, 0);
+
 console.log('全部算法自检通过 ✔');
