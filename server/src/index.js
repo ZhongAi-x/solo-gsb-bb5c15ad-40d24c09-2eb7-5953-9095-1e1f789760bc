@@ -3,7 +3,7 @@
 const path = require('path');
 const fs = require('fs');
 const express = require('express');
-const { cutBoards, UserError } = require('./cutting');
+const { cutBoards, cutOrders, UserError } = require('./cutting');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 8080;
@@ -15,7 +15,7 @@ app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
 });
 
-// 排料计算
+// 排料计算（单订单）
 app.post('/api/cut', (req, res) => {
   try {
     const result = cutBoards(req.body);
@@ -25,6 +25,20 @@ app.post('/api/cut', (req, res) => {
       return res.status(err.statusCode).json({ ok: false, error: err.message });
     }
     console.error('排料计算失败：', err);
+    res.status(500).json({ ok: false, error: '服务器内部错误' });
+  }
+});
+
+// 多订单拼版（含材料费分摊与分单取件清单）
+app.post('/api/cut-orders', (req, res) => {
+  try {
+    const result = cutOrders(req.body);
+    res.json({ ok: true, result });
+  } catch (err) {
+    if (err instanceof UserError) {
+      return res.status(err.statusCode).json({ ok: false, error: err.message });
+    }
+    console.error('多订单拼版计算失败：', err);
     res.status(500).json({ ok: false, error: '服务器内部错误' });
   }
 });

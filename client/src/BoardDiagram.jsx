@@ -18,8 +18,11 @@ const PAD = 14;
  * 单板裁切图示：
  *  - 米黄色底 = 余料；彩色块 = 零件；灰色锯缝带 + 虚线刀刃 = 每一刀
  *  - 圆形编号标注下刀次序（贯穿当前矩形区域）
+ *  - colorFor / labelFor 可自定义零件着色与标签（多订单拼版时按订单着色）
  */
-export default function BoardDiagram({ board, boardWidth, boardHeight }) {
+export default function BoardDiagram({ board, boardWidth, boardHeight, colorFor, labelFor }) {
+  const colorOf = colorFor || ((p) => partColor(p.part));
+  const labelOf = labelFor || ((p) => p.part);
   const maxW = 620;
   const maxH = 520;
   const sx = maxW / boardWidth;
@@ -55,6 +58,7 @@ export default function BoardDiagram({ board, boardWidth, boardHeight }) {
       {/* 零件 */}
       {board.placements.map((p, i) => {
         const { id, dims } = labelText(p);
+        const label = labelOf(p);
         const w = p.w * scale;
         const h = p.h * scale;
         const showMain = w > 56 && h > 26;
@@ -66,15 +70,15 @@ export default function BoardDiagram({ board, boardWidth, boardHeight }) {
               y={px(p.y)}
               width={w}
               height={h}
-              fill={partColor(p.part)}
+              fill={colorOf(p)}
               stroke="#334155"
               strokeWidth={1.2}
             >
-              <title>{`${p.part} ${id}：${dims}，位置 (${strip(p.x)}, ${strip(p.y)})`}</title>
+              <title>{`${label} ${id}：${dims}，位置 (${strip(p.x)}, ${strip(p.y)})`}</title>
             </rect>
             {showMain && (
               <text x={px(p.x) + w / 2} y={px(p.y) + h / 2 - (showDims ? 4 : 0)} className="part-label">
-                {p.part.length > 8 ? p.part.slice(0, 8) + '…' : p.part} {id}
+                {label.length > 10 ? label.slice(0, 10) + '…' : label} {id}
               </text>
             )}
             {showDims && (
